@@ -1,0 +1,15 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    Success!
+{% endblock %}
+
+{% block body %}
+    <h1>Success!</h1>
+
+    {{ message }}
+
+    {% if current_user.is_authenticated %}
+      Hi {{ current_user.name }}!
+    {% endif %}
+{% endblock %}
