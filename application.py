@@ -1,10 +1,11 @@
 import os
 
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from flask_session import Session
 from flask_login import LoginManager, login_user, current_user, logout_user
 from models import *
 from sqlalchemy import or_
+import requests
 
 app = Flask(__name__)
 
@@ -93,7 +94,7 @@ def search():
 
     if books.scalar() is None:
         return render_template("error.html", message = "No books matched your query.")
-    
+
     return render_template("books.html", books=books)
 
 
@@ -105,4 +106,57 @@ def book(book_id):
     if book is None:
         return render_template("error.html", message="The book was not found.")
 
-    return render_template("book.html", book=book)
+    reviews = book.reviews
+
+    #get data from Goodreads
+    res = requests.get("https://www.goodreads.com/book/review_counts.json", params={"key": os.getenv("GOODREADS_KEY"), "isbns": book.isbn})
+    if res.status_code == 200:
+        goodreads = res.json()["books"][0]
+        return render_template("book_goodreads.html", book=book, reviews=reviews, average_rating = goodreads["average_rating"], number_of_ratings = goodreads["work_text_reviews_count"])
+
+    return render_template("book.html", book=book, reviews=reviews)
+
+
+@app.route("/review/<int:book_id>", methods=["POST"])
+def review(book_id):
+        book = Book.query.get(book_id)
+
+        user_id=current_user.get_id()
+        review_from_user = Review.query.filter_by(user_id=user_id, book_id=book_id)
+
+        # If user has not reviewed this book
+        if review_from_user.scalar() is None:
+            review_rating = request.form.get("form_review_rating")
+            review_text = request.form.get("form_review_text")
+            current_user.add_review(review_rating, review_text, book_id)
+
+        reviews = book.reviews
+
+        return render_template("book.html", book=book, reviews=reviews)
+
+
+@app.route("/api/<string:isbn>")
+def book_api(isbn):
+    book = Book.query.filter_by(isbn=isbn).first()
+
+    if book is None:
+        return jsonify({"error": "ISBN not in database."}), 404
+
+    review_count = 0
+    average_score = 0
+    reviews = book.reviews
+
+    for review in reviews:
+        review_count += 1
+        average_score += review.review_rating
+
+    average_score = average_score/review_count
+
+    return jsonify({
+            "title": book.title,
+            "author": book.author,
+            "year": book.year,
+            "isbn": book.isbn,
+            "review_count": review_count,
+            "average_score": average_score
+        })
